@@ -69,6 +69,13 @@ def get_zones(dnsconn):
     return zones
 
 
+def extract_soamail(rec):
+    "Transform mail in SOA rec into proper email address"
+    if rec[-1] == '.':
+        rec = recl[0:-1]
+    return rec.replace('.', '@', 1)
+
+
 def sync_zone(dns1, dns2, zone, mail, remove):
     """sync zone from dns1 to dns2,
        cleaning extra records in dns2 is remove is True
@@ -77,7 +84,36 @@ def sync_zone(dns1, dns2, zone, mail, remove):
     # Append trailing '.' if not passed
     if zone[-1] != '.':
         zone += '.'
-    print(f"Sync zone {zone}: not yet implemented")
+    # print(f"Sync zone {zone}: not yet implemented")
+    dzone = dns1.find_zone(zone)
+    if not dzone:
+        print(f'ERROR: zone {zone} does not exist in src cloud', file=sys.stderr)
+        return 1
+    rsets = dns1.recordsets(dzone)
+    zonens = dns1.recordsets(dzone, name=zone, type='NS')
+    if not zonens:
+        print(f'ERROR: zone {zone} has no NS records', file=sys.stderr)
+        return 1
+    zonesoa = dns1.recordsets(dzone, name=zone, type='SOA')
+    if not zonesoa:
+        print(f'EROOR: zone {zone} has no SOA record', file=sys.stderr)
+        return 1
+    srcns = list(zonens)[0].records
+    srcsoa = list(zonesoa)[0].records[0].split(" ")
+    if mail:
+        soamail = mail
+    else:
+        # soamail = extract_soamail(srcsoa[1])
+        soamail = dzone.email
+    
+    tzone = dns2.find_zone(zone)
+    if not tzone:
+        print(f"DNS create(name={zone}, ttl={srcsoa[4]}, mail={soamail})")
+        tzone = dns2.create_zone(name=zone, ttl=srcsoa[4], email=soamail, description=dzone.description)
+
+    dstns = list(dns2.recordsets(tzone, name=zone, type='NS'))[0].records
+
+    return 0
 
 
 def main(argv):
@@ -104,9 +140,11 @@ def main(argv):
     else:
         zones = args.zones
 
+    errs = 0
     for zone in zones:
-        sync_zone(cloud1.dns, cloud2.dns, zone, args.mail, args.remove)
+        errs += sync_zone(cloud1.dns, cloud2.dns, zone, args.mail, args.remove)
 
+    return errs
 
 # Call main if used alone
 if __name__ == "__main__":
