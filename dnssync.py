@@ -78,7 +78,17 @@ def extract_soamail(rec):
 
 def find_record(dns, zone, rec):
     "Find matching record"
-    return dns.recordsets(zone, name=rec.name, type=rec.type)
+    rset = dns.recordsets(zone, name=rec.name, type=rec.type)
+    if rset:
+        rset = list(rset)
+        if len(rset) == 0:
+            return None
+        if len(rset) != 1:
+            print(f"ERROR: recordset({rec.name}, {rec.type} not unique: {rset}",
+                  file=sys.stderr)
+        assert len(rset) == 1
+        return rset[0]
+    return None
 
 
 def sync_zone(dns1, dns2, zone, mail, remove):
@@ -118,8 +128,8 @@ def sync_zone(dns1, dns2, zone, mail, remove):
         try:
             tzone = dns2.create_zone(name=zone, ttl=srcsoa[4], email=soamail,
                                      description=szone.description)
-        except BaseException as e:
-            print(e, file=sys.stderr)
+        except BaseException as exc:
+            print(exc, file=sys.stderr)
             return 1
 
     dstns = list(dns2.recordsets(tzone, name=zone, type='NS'))[0].records
@@ -132,22 +142,26 @@ def sync_zone(dns1, dns2, zone, mail, remove):
             # FIXME: May need better way to compare lists
             if sset.records == srcns or sset.records == dstns:
                 continue
+        # Never overwrite SOA (ignore TTL differences if any)
+        if sset.type == 'SOA':
+            continue
         # Record already present?
         tset = find_record(dns2, tzone, sset)
+        # FIXME: Do we need to copy over status field as well?
         if not tset:
             try:
                 dns2.create_recordset(tzone, name=sset.name, type=sset.type, ttl=sset.ttl,
-                                      record=sset.record, description=sset.description)
-            except BaseException as e:
-                print(e, file=sys.stderr)
+                                      records=sset.records, description=sset.description)
+            except BaseException as exc:
+                print(exc, file=sys.stderr)
                 errs += 1
         else:
-            if tset.ttl != sset.ttl or tset.record != sset.record or tset.description != sset.description:
+            if tset.ttl != sset.ttl or tset.records != sset.records or tset.description != sset.description:
                 try:
                     dns2.update_recordset(tset, name=sset.name, type=sset.type, ttl=sset.ttl,
-                                          record=sset.record, description=sset.description)
-                except BaseException as e:
-                    print(e, file=sys.stderr)
+                                          records=sset.records, description=sset.description)
+                except BaseException as exc:
+                    print(exc, file=sys.stderr)
                     errs += 1
     # Backward cleanup
     if remove:
@@ -156,8 +170,8 @@ def sync_zone(dns1, dns2, zone, mail, remove):
             if not sset:
                 try:
                     dns2.delete_recordset(tset)
-                except BaseException as e:
-                    print(e, file=sys.stderr)
+                except BaseException as exc:
+                    print(exc, file=sys.stderr)
                     errs += 1
     return errs
 
