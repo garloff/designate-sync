@@ -72,8 +72,13 @@ def get_zones(dnsconn):
 def extract_soamail(rec):
     "Transform mail in SOA rec into proper email address"
     if rec[-1] == '.':
-        rec = recl[0:-1]
+        rec = rec[0:-1]
     return rec.replace('.', '@', 1)
+
+
+def find_record(dns, zone, rec):
+    "Find matching record"
+    return dns.recordsets(zone, name=rec.name, type=rec.type)
 
 
 def sync_zone(dns1, dns2, zone, mail, remove):
@@ -85,16 +90,16 @@ def sync_zone(dns1, dns2, zone, mail, remove):
     if zone[-1] != '.':
         zone += '.'
     # print(f"Sync zone {zone}: not yet implemented")
-    dzone = dns1.find_zone(zone)
-    if not dzone:
+    szone = dns1.find_zone(zone)
+    if not szone:
         print(f'ERROR: zone {zone} does not exist in src cloud', file=sys.stderr)
         return 1
-    rsets = dns1.recordsets(dzone)
-    zonens = dns1.recordsets(dzone, name=zone, type='NS')
+    ssets = dns1.recordsets(szone)
+    zonens = dns1.recordsets(szone, name=zone, type='NS')
     if not zonens:
         print(f'ERROR: zone {zone} has no NS records', file=sys.stderr)
         return 1
-    zonesoa = dns1.recordsets(dzone, name=zone, type='SOA')
+    zonesoa = dns1.recordsets(szone, name=zone, type='SOA')
     if not zonesoa:
         print(f'EROOR: zone {zone} has no SOA record', file=sys.stderr)
         return 1
@@ -104,16 +109,57 @@ def sync_zone(dns1, dns2, zone, mail, remove):
         soamail = mail
     else:
         # soamail = extract_soamail(srcsoa[1])
-        soamail = dzone.email
-    
+        soamail = szone.email
+
+    errs = 0
     tzone = dns2.find_zone(zone)
     if not tzone:
         print(f"DNS create(name={zone}, ttl={srcsoa[4]}, mail={soamail})")
-        tzone = dns2.create_zone(name=zone, ttl=srcsoa[4], email=soamail, description=dzone.description)
+        try:
+            tzone = dns2.create_zone(name=zone, ttl=srcsoa[4], email=soamail,
+                                     description=szone.description)
+        except BaseException as e:
+            print(e, file=sys.stderr)
+            return 1
 
     dstns = list(dns2.recordsets(tzone, name=zone, type='NS'))[0].records
-
-    return 0
+    tsets = dns2.recordsets(tzone)
+    # TODO: Check if it's more efficient to collect lists and then iterate over them ...
+    # Forward copy
+    for sset in ssets:
+        # Do not copy NS records for sub domains pointing to one self
+        if sset.type == 'NS':
+            # FIXME: May need better way to compare lists
+            if sset.records == srcns or sset.records == dstns:
+                continue
+        # Record already present?
+        tset = find_record(dns2, tzone, sset)
+        if not tset:
+            try:
+                dns2.create_recordset(tzone, name=sset.name, type=sset.type, ttl=sset.ttl,
+                                      record=sset.record, description=sset.description)
+            except BaseException as e:
+                print(e, file=sys.stderr)
+                errs += 1
+        else:
+            if tset.ttl != sset.ttl or tset.record != sset.record or tset.description != sset.description:
+                try:
+                    dns2.update_recordset(tset, name=sset.name, type=sset.type, ttl=sset.ttl,
+                                          record=sset.record, description=sset.description)
+                except BaseException as e:
+                    print(e, file=sys.stderr)
+                    errs += 1
+    # Backward cleanup
+    if remove:
+        for tset in tsets:
+            sset = find_record(dns1, szone, tset)
+            if not sset:
+                try:
+                    dns2.delete_recordset(tset)
+                except BaseException as e:
+                    print(e, file=sys.stderr)
+                    errs += 1
+    return errs
 
 
 def main(argv):
@@ -145,6 +191,7 @@ def main(argv):
         errs += sync_zone(cloud1.dns, cloud2.dns, zone, args.mail, args.remove)
 
     return errs
+
 
 # Call main if used alone
 if __name__ == "__main__":
