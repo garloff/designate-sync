@@ -5,7 +5,7 @@ Copy over designate-managed DNS zones over from one OpenStack cloud to another
 `dnssync.py` is a utility to copy/sync designate managed DNS zones
 from one OpenStack Cloud to another.
 
-Usage: `dnssync.py --from-cloud=`CLOUD1` --to-cloud=`CLOUD2 [options]` --all`|ZONE1 [ZONE2 ...]
+Usage: `dnssync.py --from-cloud=`CLOUD1` --to-cloud=`CLOUD2 [options]` --all`|ZONE1 [ZONE2 ...]<br/>
 Options: `--remove`|`-r`    remove records in target not found in source<br/>
          `--mail`|`-m `MAIL override email address in SOA records<br/>
          `--quiet`|`-q`     don't output statistics<br/>
@@ -29,6 +29,6 @@ NS records for further zones (subdomains) are analyzed -- if they point to
 a third party DNS, they are copied over. If they point to the DNS NS of either
 source or target cloud, they are ignored.
 
-(c) Kurt Garloff <scs@garloff.de>, 2/2024
+(c) Kurt Garloff <scs@garloff.de>, 2/2024<br/>
 SPDX-License-Identifier: CC-BY-SA-4.0
 
