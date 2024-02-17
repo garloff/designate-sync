@@ -7,6 +7,8 @@ from one OpenStack Cloud to another.
 Usage: dnssync.py --from-cloud=CLOUD1 --to-cloud=CLOUD2 [options] --all|ZONE1 [ZONE2 ...]
 Options: --remove|-r    remove records in target not found in source
          --mail|-m MAIL override email address in SOA records
+         --quiet|-q     don't output statistics
+         --verbose|-v   progress output
 
 dnssync.py looks at all records from ZONE1 (and ZONE2 if specified oor all
 zones with --all) in CLOUD1 and analyzes all records. It then looks at the
@@ -36,6 +38,16 @@ import argparse
 import openstack
 
 
+# Globals
+nodom = 0
+nodomcreate = 0
+noreccreate = 0
+norecskip   = 0
+norecchange = 0
+norecnochg  = 0
+norecdelete = 0
+
+
 def usage():
     "Help function"
     print(__doc__, file=sys.stderr)
@@ -48,6 +60,10 @@ def setup_parser():
                                      description='sync designate zones')
     parser.add_argument('-r', '--remove', action='store_true',
                         help='remove extra records on target cloud')
+    parser.add_argument('-q', '--quiet', action='store_true',
+                        help='suppress statistics')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='output progress')
     parser.add_argument('-m', '--mail',
                         help='override email address in SOA records')
     parser.add_argument('-f', '--from-cloud', required=True,
@@ -91,15 +107,28 @@ def find_record(dns, zone, rec):
     return None
 
 
-def sync_zone(dns1, dns2, zone, mail, remove):
+def set_equal(set1, set2):
+    "Compare unordered set for equality"
+    for el1 in set1:
+        if el1 not in set2:
+            return False
+    for el2 in set2:
+        if el2 not in set1:
+            return False
+    return True
+
+
+def sync_zone(dns1, dns2, zone, mail, remove, verbose):
     """sync zone from dns1 to dns2,
        cleaning extra records in dns2 is remove is True
        overwriting mail in SOA if passed.
     """
+    global nodomcreate, noreccreate, norecchange, norecnochg, norecdelete, norecskip
     # Append trailing '.' if not passed
     if zone[-1] != '.':
         zone += '.'
-    # print(f"Sync zone {zone}: not yet implemented")
+    if verbose:
+        print(f"Sync zone {zone}")
     szone = dns1.find_zone(zone)
     if not szone:
         print(f'ERROR: zone {zone} does not exist in src cloud', file=sys.stderr)
@@ -128,7 +157,8 @@ def sync_zone(dns1, dns2, zone, mail, remove):
         try:
             tzone = dns2.create_zone(name=zone, ttl=srcsoa[4], email=soamail,
                                      description=szone.description)
-        except BaseException as exc:
+            nodomcreate += 1
+        except openstack.exceptions.SDKException as exc:
             print(exc, file=sys.stderr)
             return 1
 
@@ -138,12 +168,15 @@ def sync_zone(dns1, dns2, zone, mail, remove):
     # Forward copy
     for sset in ssets:
         # Do not copy NS records for sub domains pointing to one self
+        if verbose:
+            print(f"\rRecord {sset.name} type {sset.type}                    ", end="")
         if sset.type == 'NS':
-            # FIXME: May need better way to compare lists
-            if sset.records == srcns or sset.records == dstns:
+            if set_equal(sset.records, srcns) or set_equal(sset.records, dstns):
+                norecskip += 1
                 continue
         # Never overwrite SOA (ignore TTL differences if any)
         if sset.type == 'SOA':
+            norecskip += 1
             continue
         # Record already present?
         tset = find_record(dns2, tzone, sset)
@@ -152,7 +185,8 @@ def sync_zone(dns1, dns2, zone, mail, remove):
             try:
                 dns2.create_recordset(tzone, name=sset.name, type=sset.type, ttl=sset.ttl,
                                       records=sset.records, description=sset.description)
-            except BaseException as exc:
+                noreccreate += 1
+            except openstack.exceptions.SDKException as exc:
                 print(exc, file=sys.stderr)
                 errs += 1
         else:
@@ -160,24 +194,33 @@ def sync_zone(dns1, dns2, zone, mail, remove):
                 try:
                     dns2.update_recordset(tset, name=sset.name, type=sset.type, ttl=sset.ttl,
                                           records=sset.records, description=sset.description)
-                except BaseException as exc:
+                    norecchange += 1
+                except openstack.exceptions.SDKException as exc:
                     print(exc, file=sys.stderr)
                     errs += 1
+            else:
+                norecnochg += 1
     # Backward cleanup
     if remove:
         for tset in tsets:
+            if verbose:
+                print(f"\rRecord {tset.name} type {tset.type}                    ", end="")
             sset = find_record(dns1, szone, tset)
             if not sset:
                 try:
                     dns2.delete_recordset(tset)
-                except BaseException as exc:
+                    norecdelete += 1
+                except openstack.exceptions.SDKException as exc:
                     print(exc, file=sys.stderr)
                     errs += 1
+    if verbose:
+        print("\r   \r", end="")
     return errs
 
 
 def main(argv):
     "Main entry point"
+    global nodom
     if not argv[1:]:
         usage()
     parser = setup_parser()
@@ -202,7 +245,14 @@ def main(argv):
 
     errs = 0
     for zone in zones:
-        errs += sync_zone(cloud1.dns, cloud2.dns, zone, args.mail, args.remove)
+        errs += sync_zone(cloud1.dns, cloud2.dns, zone, args.mail, args.remove, args.verbose)
+        nodom += 1
+
+    if not args.quiet:
+        print(f"Statistics: {nodom} domains processed, {nodomcreate} domains created")
+        print(f"            {noreccreate} records created, {norecdelete} records deleted")
+        print(f"            {norecchange} records changed, {norecnochg} records unchanged, {norecskip} records skipped")
+        print(f"{errs} errors")
 
     return errs
 
