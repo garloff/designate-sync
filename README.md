@@ -6,10 +6,10 @@ Copy over designate-managed DNS zones over from one OpenStack cloud to another
 from one OpenStack Cloud to another.
 
 Usage: `dnssync.py --from-cloud=`CLOUD1` --to-cloud=`CLOUD2 [options]` --all`|ZONE1 [ZONE2 ...]
-Options: `--remove`|`-r`    remove records in target not found in source
-         `--mail`|`-m `MAIL override email address in SOA records
-         `--quiet`|`-q`     don't output statistics
-         `--verbose`|`-v`   progress output
+Options: `--remove`|`-r`    remove records in target not found in source<br/>
+         `--mail`|`-m `MAIL override email address in SOA records<br/>
+         `--quiet`|`-q`     don't output statistics<br/>
+         `--verbose`|`-v`   progress output<br/>
 
 `dnssync.py` looks at all records from ZONE1 (and ZONE2 if specified or all
 zones with `--all`) in CLOUD1 and analyzes all records. It then looks at the
