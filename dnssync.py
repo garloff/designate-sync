@@ -10,7 +10,7 @@ Options: --remove|-r    remove records in target not found in source
          --quiet|-q     don't output statistics
          --verbose|-v   progress output
 
-dnssync.py looks at all records from ZONE1 (and ZONE2 if specified oor all
+dnssync.py looks at all records from ZONE1 (and ZONE2 if specified or all
 zones with --all) in CLOUD1 and analyzes all records. It then looks at the
 records in the same zone in CLOUD2, creating the zone if needed. All records
 are copied over.
